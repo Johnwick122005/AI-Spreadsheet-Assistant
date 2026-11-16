@@ -1,0 +1,11 @@
+Typefaces
+=========
+
+Libre Franklin — Copyright 2016 The Libre Franklin Project Authors.
+Source Serif 4 — Copyright 2014-2021 Adobe.
+Spline Sans Mono — Copyright 2021 The Spline Sans Mono Project Authors.
+
+All three are licensed under the SIL Open Font License, Version 1.1.
+Full license: https://openfontlicense.org/open-font-license-official-text/
+
+The .woff2 files here are latin subsets served by Google Fonts.
