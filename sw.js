@@ -3,6 +3,7 @@
 ======================================================================*/
 
 const CACHE_NAME = 'aispreadsheet-v29';
+const PRECACHE_TIMEOUT = 8000;
 const ASSETS = [
   './',
   './index.html',
@@ -41,11 +42,15 @@ self.addEventListener('install', (e) => {
   e.waitUntil((async () => {
     const cache = await caches.open(CACHE_NAME);
     await Promise.allSettled(ASSETS.map(async (url) => {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), PRECACHE_TIMEOUT);
       try {
-        const response = await fetch(url, { cache: 'reload' });
+        const response = await fetch(url, { cache: 'reload', signal: controller.signal });
         if (response.ok || response.type === 'opaque') await cache.put(url, response);
       } catch (err) {
         console.warn('Precache skipped:', url, err.message);
+      } finally {
+        clearTimeout(timer);
       }
     }));
     await self.skipWaiting();
