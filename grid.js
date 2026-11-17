@@ -201,6 +201,7 @@ function startEdit(addr, td) {
     if (!sheet.cells[addr]) sheet.cells[addr] = {};
     sheet.cells[addr].raw = val;
     computeAndCache(addr);
+    recalculateSheet();
     dirty = true;
     if (sheets[activeSheet]) sheets[activeSheet].dirty = true;
     renderGrid();
@@ -218,9 +219,8 @@ function startEdit(addr, td) {
   });
 }
 
-export function computeAndCache(addr) {
-  const sheet = sheets[activeSheet];
-  const cell = sheet.cells[addr];
+function computeIntoSheet(sheet, addr) {
+  const cell = sheet?.cells?.[addr];
   if (!cell) return;
 
   const raw = cell.raw || '';
@@ -241,8 +241,25 @@ export function computeAndCache(addr) {
   }
 }
 
-export function recomputeAndRender(addr) {
-  computeAndCache(addr);
+export function computeAndCache(addr) {
+  computeIntoSheet(sheets[activeSheet], addr);
+}
+
+/* Recompute every formula on a sheet. Values are resolved recursively from the
+   raw cell contents, so order does not matter. Editing one cell can therefore
+   refresh every dependent total in the same pass. */
+export function recalculateSheet(name = activeSheet) {
+  const sheet = sheets[name];
+  if (!sheet) return;
+  Object.keys(sheet.cells).forEach((addr) => computeIntoSheet(sheet, addr));
+}
+
+export function recalculateAllSheets() {
+  Object.keys(sheets).forEach((name) => recalculateSheet(name));
+}
+
+export function recomputeAndRender() {
+  recalculateSheet();
   renderGrid();
 }
 

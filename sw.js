@@ -2,7 +2,7 @@
   Service Worker — Offline Caching
 ======================================================================*/
 
-const CACHE_NAME = 'aispreadsheet-v28';
+const CACHE_NAME = 'aispreadsheet-v29';
 const ASSETS = [
   './',
   './index.html',
@@ -36,8 +36,20 @@ const NETWORK_ONLY_HOSTS = new Set([
 ]);
 
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS)));
-  self.skipWaiting();
+  // Cache each asset independently. A slow or blocked CDN must not abort the
+  // whole install, or the app would lose offline support entirely.
+  e.waitUntil((async () => {
+    const cache = await caches.open(CACHE_NAME);
+    await Promise.allSettled(ASSETS.map(async (url) => {
+      try {
+        const response = await fetch(url, { cache: 'reload' });
+        if (response.ok || response.type === 'opaque') await cache.put(url, response);
+      } catch (err) {
+        console.warn('Precache skipped:', url, err.message);
+      }
+    }));
+    await self.skipWaiting();
+  })());
 });
 
 self.addEventListener('activate', (e) => {

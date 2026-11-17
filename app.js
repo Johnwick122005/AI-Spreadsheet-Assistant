@@ -13,7 +13,7 @@ import {
   renderTabs, renderGrid, moveSelection, selectCell,
   seedDemoData, getCellValue, ensureCell, setCellValue,
   recomputeAndRender, getCurrentSheet, setSheetDirty, colIndexToCol,
-  parseAddr, colIndex,
+  parseAddr, colIndex, recalculateSheet, recalculateAllSheets,
 } from './grid.js';
 import {
   isAIEnabled, sendAIMessage, testConnection,
@@ -84,6 +84,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (cur && Object.keys(cur.cells).length === 0) {
       seedDemoData(getActiveSheet());
     }
+
+    // Values are stored with the sheets; recompute formulas so totals always
+    // reflect the raw cells that were saved (and today's date for TODAY()).
+    recalculateAllSheets();
 
     renderTabs();
     renderGrid();
@@ -573,6 +577,88 @@ async function exportCSV() {
   showToast('Exported to CSV', 'ok');
 }
 
+/* Minimal RFC-4180 CSV reader: quoted fields, doubled quotes, embedded commas
+   and newlines, CRLF or LF, optional BOM. Used for .csv imports so they keep
+   working when the SheetJS CDN script is unavailable (offline or blocked). */
+function parseCSV(text) {
+  const src = String(text ?? '').replace(/^\uFEFF/, '');
+  const rows = [];
+  let row = [];
+  let field = '';
+  let inQuotes = false;
+
+  for (let i = 0; i < src.length; i++) {
+    const ch = src[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (src[i + 1] === '"') { field += '"'; i++; }
+        else inQuotes = false;
+      } else {
+        field += ch;
+      }
+    } else if (ch === '"') {
+      inQuotes = true;
+    } else if (ch === ',') {
+      row.push(field);
+      field = '';
+    } else if (ch === '\n') {
+      row.push(field);
+      rows.push(row);
+      row = [];
+      field = '';
+    } else if (ch !== '\r') {
+      field += ch;
+    }
+  }
+  if (field.length || row.length) {
+    row.push(field);
+    rows.push(row);
+  }
+  return rows;
+}
+
+/* Replace the active sheet with a parsed grid.
+   Two layouts are accepted:
+   1. This app's own export — first row is a column map: "", "A", "B", …
+   2. A normal CSV/XLSX — first row is a header row written into A1, B1, … */
+function applyImportedRows(json) {
+  if (!json.length) { showToast('Empty sheet', 'error'); return false; }
+
+  const firstRow = json[0] || [];
+  const isColumnMap = firstRow.length > 1
+    && !String(firstRow[0] ?? '').trim()
+    && firstRow.slice(1).every((v) => !String(v ?? '').trim() || /^[A-Z]+$/i.test(String(v).trim()));
+
+  const headers = firstRow;
+  getCurrentSheet().cells = {};
+  json.forEach((row, rIdx) => {
+    if (isColumnMap && rIdx === 0) return;
+    const r = isColumnMap ? rIdx : rIdx + 1;
+
+    row.forEach((val, cIdx) => {
+      if (val === undefined || val === null || val === '') return;
+
+      let addr;
+      if (isColumnMap) {
+        const m = String(headers[cIdx] ?? '').match(/^([A-Z]+)$/i);
+        if (!m) return;
+        addr = m[1].toUpperCase() + r;
+      } else {
+        if (cIdx >= COLUMNS) return;
+        addr = colIndexToCol(cIdx) + r;
+      }
+
+      getCurrentSheet().cells[addr] = { raw: String(val), value: String(val), error: null };
+    });
+  });
+  setSheetDirty(getActiveSheet(), true);
+  setDirty(true);
+  recalculateSheet(getActiveSheet());
+  renderGrid();
+  showToast(`Imported ${json.length - 1} rows`, 'ok');
+  return true;
+}
+
 async function handleImport(e) {
   const file = e.target.files[0];
   if (!file) return;
@@ -587,55 +673,30 @@ async function handleImport(e) {
     return;
   }
 
+  const isCSV = /\.csv$/i.test(file.name) || file.type === 'text/csv';
   const reader = new FileReader();
-  reader.onload = async (ev) => {
+  reader.onload = (ev) => {
     try {
-      const XLSX = window.XLSX;
-      if (!XLSX) { showToast('SheetJS not loaded', 'error'); return; }
-      const wb = XLSX.read(new Uint8Array(ev.target.result), { type: 'array' });
-      const ws = wb.Sheets[wb.SheetNames[0]];
-      const json = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false });
-      if (!json.length) { showToast('Empty sheet', 'error'); return; }
-
-      /* Two layouts are accepted:
-         1. This app's own export — first row is a column map: "", "A", "B", …
-         2. A normal CSV/XLSX — first row is a header row written into A1, B1, … */
-      const firstRow = json[0] || [];
-      const isColumnMap = firstRow.length > 1
-        && !String(firstRow[0] ?? '').trim()
-        && firstRow.slice(1).every((v) => !String(v ?? '').trim() || /^[A-Z]+$/i.test(String(v).trim()));
-
-      const headers = firstRow;
-      getCurrentSheet().cells = {};
-      json.forEach((row, rIdx) => {
-        if (isColumnMap && rIdx === 0) return;
-        const r = isColumnMap ? rIdx : rIdx + 1;
-
-        row.forEach((val, cIdx) => {
-          if (val === undefined || val === null || val === '') return;
-
-          let addr;
-          if (isColumnMap) {
-            const m = String(headers[cIdx] ?? '').match(/^([A-Z]+)$/i);
-            if (!m) return;
-            addr = m[1].toUpperCase() + r;
-          } else {
-            if (cIdx >= COLUMNS) return;
-            addr = colIndexToCol(cIdx) + r;
-          }
-
-          getCurrentSheet().cells[addr] = { raw: String(val), value: String(val), error: null };
-        });
-      });
-      setSheetDirty(getActiveSheet(), true);
-      setDirty(true);
-      renderGrid();
-      showToast(`Imported ${json.length - 1} rows`, 'ok');
+      let json;
+      if (isCSV) {
+        json = parseCSV(ev.target.result);
+      } else {
+        const XLSX = window.XLSX;
+        if (!XLSX) {
+          showToast('Excel import needs SheetJS — connect once, then retry', 'error');
+          return;
+        }
+        const wb = XLSX.read(new Uint8Array(ev.target.result), { type: 'array' });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        json = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false });
+      }
+      applyImportedRows(json);
     } catch (err) {
       showToast('Import failed: ' + err.message, 'error');
     }
   };
-  reader.readAsArrayBuffer(file);
+  if (isCSV) reader.readAsText(file);
+  else reader.readAsArrayBuffer(file);
 }
 
 /*======================================================================
@@ -1371,6 +1432,7 @@ function insertTableSmart(table, promptText = 'AI Result', plan = null) {
     const cell = setCellValue(record.addr, record.value);
     if (cell && record.header) cell.header = true;
   }
+  recalculateSheet(sheet);
 
   setDirty(true);
   setSheetDirty(sheet, true);
