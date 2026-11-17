@@ -228,7 +228,7 @@ If the browser is closed while an AI edit is pending, the reload guard asks you 
 
 - **Online / Offline** reflects `navigator.onLine` and updates live.
 - **AI ready / AI off** reflects whether at least one provider key exists.
-- The status bar shows **Ready**, **Unsaved changes**, or a short description of the last action.
+- The status bar shows **Ready** or **Unsaved changes**, plus the selected cell address.
 - Formula errors render as `⚠ #CYCLE`, `⚠ #DIV/0!`, and so on, with the cell styled as an error.
 
 ---
@@ -390,7 +390,7 @@ Click it to open the picker.
 - The picker is keyboard-navigable and fits a mobile viewport.
 - If the provider's model endpoint cannot be reached, the app falls back to its built-in candidates and the provider default rather than blocking the chat.
 
-The picker lists what the key can actually use, not a hard-coded catalog. Models are discovered from:
+The picker lists the provider's current catalog for that key, not a hard-coded list. Models are discovered from:
 
 - `https://api.groq.com/openai/v1/models`
 - `https://generativelanguage.googleapis.com/v1beta/models`
@@ -618,9 +618,9 @@ Exported CSV uses the app's round-trip layout:
 
 ```csv
 ,A,B,C
-1,Item,Price,Qty
-2,Apples,1.50,10
-3,Bananas,0.75,20
+1,"Item","Price","Qty"
+2,"Apples","1.50","10"
+3,"Bananas","0.75","20"
 ```
 
 The first row maps column positions to letters, and the first column stores row numbers. This lets a re-import place values at the same addresses instead of guessing.
@@ -946,7 +946,8 @@ The repository does not ship a test runner. The build was validated with local P
 - free-model discovery, free-first ordering, fallback, model memory, and reasoning headroom;
 - the model picker on desktop and mobile;
 - permission slips, decline/retry, table insertion, Save, Discard, sheet removal on discard, manual Save, keyboard Save, and mobile strip fit;
-- reload persistence and the pending-edit guard.
+- reload persistence and the pending-edit guard;
+- service-worker install, shell caching, and an offline reload.
 
 If you add a test runner, keep it outside the runtime path; the app deliberately has no dependency graph to install.
 
