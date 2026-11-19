@@ -70,27 +70,58 @@ export async function del(storeName, id) {
 
 /* ---------- Sheet CRUD ---------- */
 
-export async function saveSheet(name, cells, raw, dirtyFlag = false) {
+/* Keeps one record per sheet name. Older builds used autoIncrement ids
+   without looking up the existing row, so duplicated names can exist in
+   IndexedDB; writes now update the newest record and the reader collapses
+   duplicates by name. */
+async function sheetRecordsByName() {
+  const all = await getAll('sheets');
+  const byName = new Map();
+  all.forEach((record) => {
+    if (!record || !record.name) return;
+    const seen = byName.get(record.name);
+    if (!seen || (record.updated_at || 0) >= (seen.updated_at || 0)) {
+      byName.set(record.name, record);
+    }
+  });
+  return byName;
+}
+
+export async function saveSheet(name, cells, raw, dirtyFlag = false, meta = null) {
+  const byName = await sheetRecordsByName();
+  const existing = byName.get(name);
   const store = await getStore('sheets', 'readwrite');
+  const record = {
+    name,
+    cells: cells || {},
+    raw: raw || {},
+    dirty: !!dirtyFlag,
+    updated_at: Date.now(),
+  };
+  if (meta) record.meta = meta;
+  if (existing && existing.id !== undefined) record.id = existing.id;
+
   return new Promise((res, rej) => {
-    const req = store.put({ name, cells, raw, dirty: dirtyFlag, updated_at: Date.now() });
+    const req = store.put(record);
     req.onsuccess = () => res(req.result);
     req.onerror = () => rej(req.error);
   });
 }
 
 export async function getSheet(name) {
-  const all = await getAll('sheets');
-  return all.find((s) => s.name === name) || null;
+  const byName = await sheetRecordsByName();
+  return byName.get(name) || null;
 }
 
-export async function getAllSheets() { return getAll('sheets'); }
+export async function getAllSheets() {
+  const byName = await sheetRecordsByName();
+  return [...byName.values()].sort((a, b) => (a.id || 0) - (b.id || 0));
+}
 
 export async function deleteSheet(name) {
   const all = await getAll('sheets');
-  const target = all.find((s) => s.name === name);
-  if (!target) return;
-  return del('sheets', target.id);
+  const targets = all.filter((s) => s.name === name);
+  for (const target of targets) await del('sheets', target.id);
 }
 
 /* ---------- Settings ---------- */

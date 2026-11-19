@@ -1,6 +1,6 @@
 # AI Spreadsheet Assistant
 
-An installable, offline-first spreadsheet that runs entirely in the browser. It has a real formula engine, multiple sheets, CSV/XLSX import and export, and an AI assistant that can research the live web before it proposes a table, a formula, or a cell edit.
+An installable, offline-first spreadsheet that runs entirely in the browser. It has a real formula engine with 116 callable functions, multi-cell ranges, undo/redo, clipboard and fill operations, formatting, find/replace, sort, multiple sheets, CSV/XLSX import and export, and an AI assistant that can research the live web before it proposes a table, a formula, or a cell edit.
 
 The assistant never writes on its own. Every write asks for permission first, and every approved write lands in an **Unsaved AI edit** state with **Save** and **Discard** controls. Nothing is committed to the workbook until you say so.
 
@@ -18,6 +18,7 @@ Built from scratch with HTML, CSS, and ES modules. No framework, no build step, 
 - [Why this exists](#why-this-exists)
 - [Screenshots](#screenshots)
 - [Feature tour](#feature-tour)
+- [Research and roadmap](#research-and-roadmap)
 - [Quick start](#quick-start)
 - [Using the spreadsheet](#using-the-spreadsheet)
 - [The assistant](#the-assistant)
@@ -103,16 +104,20 @@ Keys are masked after they are added. Each provider keeps an ordered pool, and *
 ### Spreadsheet
 
 - 26 columns (A–Z) × 100 rows per sheet.
-- Multiple named sheets, created from the toolbar or the `+` tab.
-- A1 references, rectangular ranges such as `B2:B10`, and formulas that resolve against the active sheet.
-- 20 built-in functions, arithmetic and comparison operators, string concatenation with `&`, and quoted string literals.
-- Formula bar that updates the selected cell as you type.
-- Double-click a cell to edit in place; `Enter` commits, `Escape` cancels.
-- Arrow-key and `Tab` navigation; `Enter` moves down.
-- Click the cell address to jump to any A1 address.
+- Multi-cell ranges with drag, `Shift+Click`, `Shift+Arrow`, and row/column header selection. The status bar reports count, sum, and average for numeric selections.
+- Multiple named sheets, cross-sheet references such as `=SUM(Sheet2!A1:A2)`, and quoted sheet names.
+- 116 callable functions (114 in the core table plus lazy `IF` and `IFERROR`) across math, statistics, text, dates, lookup, logical, financial, and conditional aggregation, plus arithmetic, comparison, string concatenation with `&`, and quoted string literals.
+- Formula bar that updates the selected cell as you type, with typing-to-edit and `F2` support on the grid.
+- Undo and redo with labelled actions, a 60-snapshot cap, and keyboard/button access.
+- Clipboard copy, cut, and paste for multi-cell blocks using TSV, with relative formula translation.
+- Fill down and fill right, with formula references translated for each target cell.
+- Formatting for a cell or range: bold, italic, underline, strikethrough, alignment, text colour, fill colour, and seven number formats.
+- Find and replace on the active sheet, with previous/next, replace one, replace all, and a case-sensitive toggle.
+- Sort a detected table by its current column, with header detection, blanks last, stable ties, and undo.
+- Sheet create, rename, duplicate, delete, and a tab context menu, with dirty markers for unsaved changes.
+- Print the used range, including formatting and row/column headers, through the browser's print dialog or save-as-PDF flow.
 - Automatic recalculation of every formula on a sheet after any edit, so dependent totals never go stale.
 - All sheets recalculated on load, so persisted formulas reflect the saved raw values.
-- Dirty markers on sheet tabs and a status bar that reports unsaved changes.
 - Explicit **Save** plus auto-save when the tab is hidden or closed.
 - CSV import and export that work without any network connection.
 - XLSX import and export through SheetJS, with the library cached for offline use after the first successful load.
@@ -138,6 +143,29 @@ Keys are masked after they are added. Each provider keeps an ordered pool, and *
 - Same-origin assets served cache-first; AI and research hosts are network-only.
 - Installable manifest with 192 px, 512 px, and maskable SVG icons.
 - No backend, no build step, no telemetry.
+
+---
+
+## Research and roadmap
+
+The spreadsheet surface was benchmarked against Microsoft Excel, Google Sheets,
+LibreOffice Calc, and Apple Numbers using their official documentation. The benchmark
+matrix, product notes, gap analysis, and source list are in
+**[docs/FEATURE-RESEARCH.md](docs/FEATURE-RESEARCH.md)**.
+
+The phased plan is in **[docs/ROADMAP.md](docs/ROADMAP.md)**:
+
+| Phase | Theme | Status |
+| --- | --- | --- |
+| 1 | Daily-driver grid: ranges, undo/redo, clipboard, formatting, find/replace, sort, fill, sheets, print, 116 functions | Shipped |
+| 2 | Structure and clarity: row/column operations, borders/fonts/merge, freeze panes, filters, multi-key sort, conditional formatting, validation, comments | Next |
+| 3 | Charts and analysis: charts, pivot tables, named ranges, array formulas, deeper formula coverage | Planned |
+| 4 | Scale and interoperability: virtualized large grids, XLSX fidelity, local version history, print layout | Planned |
+| 5 | Collaboration and automation: optional backend collaboration, sandboxed macros, expanded reviewed AI | Conditional |
+
+Phase 1 deliberately stays small enough to read, audit, and run offline. Features that
+would require a backend, arbitrary code execution, or a much larger data model are
+scheduled later rather than faked.
 
 ---
 
@@ -191,8 +219,13 @@ Service workers and installation require `https://` or `localhost`.
 | Action | How |
 | --- | --- |
 | Select a cell | Click it, or use the arrow keys |
-| Edit in place | Double-click the cell |
+| Select a range | Drag across cells, or click the first cell and `Shift+Click` the last |
+| Extend a selection | `Shift+Arrow` |
+| Select a whole row or column | Click its header |
+| Select the whole sheet | `Ctrl+A`, or click the corner header |
+| Edit in place | Double-click the cell, press `F2`, or start typing |
 | Commit an inline edit | `Enter` |
+| Commit and move up | `Shift+Enter` in the cell editor |
 | Cancel an inline edit | `Escape` |
 | Edit through the formula bar | Select the cell, type in the `ƒx` field |
 | Commit and move down | `Enter` in the formula bar |
@@ -200,19 +233,104 @@ Service workers and installation require `https://` or `localhost`.
 | Move one cell | Arrow keys |
 | Move right / left | `Tab` / `Shift+Tab` |
 | Move down | `Enter` |
+| Move to the edge of the data | `Ctrl+Arrow` |
+| Move 20 rows | `PageUp` / `PageDown` |
+| Move to column A | `Home` |
+| Jump to the start | `Ctrl+Home` |
 | Jump to an address | Click the `A1` box and type a reference |
+| Clear the selected cells | `Delete` or `Backspace` |
 | Close the assistant | `Escape`, or the `×` in its header |
 
-Buttons and other interactive controls keep their normal keyboard behavior; the grid shortcuts only apply when focus is not inside an input, textarea, select, button, link, or editable element.
+Buttons and other interactive controls keep their normal keyboard behaviour. Grid
+shortcuts apply when focus is not inside an input, textarea, select, dialog, link, or
+editable element.
+
+### Clipboard, fill, and undo
+
+| Action | Shortcut |
+| --- | --- |
+| Copy the selection | `Ctrl+C` |
+| Cut the selection | `Ctrl+X` |
+| Paste | `Ctrl+V` |
+| Fill down from the top row of the selection | `Ctrl+D` |
+| Fill right from the left column of the selection | `Ctrl+R` |
+| Undo | `Ctrl+Z` |
+| Redo | `Ctrl+Y` or `Ctrl+Shift+Z` |
+
+- Clipboard data is plain-text TSV, so it pastes cleanly into other spreadsheet
+  applications and accepts a TSV block from them.
+- Relative references translate on paste and fill; absolute references stay fixed.
+- A cut copies the selection and clears the source immediately; paste then places it at
+  the target.
+- Undo and redo use full-workbook snapshots and cover edits, formatting, fill, paste,
+  sort, replace, and sheet operations. History is capped at 60 actions and is cleared
+  when the page reloads.
+
+### Formatting
+
+The format bar applies to every cell in the current selection:
+
+- **Bold**, **italic**, **underline**, and **strikethrough** (`Ctrl+B`, `Ctrl+I`,
+  `Ctrl+U` for the first three).
+- Left, centre, or right alignment.
+- Text colour and fill colour.
+- Number format: **General**, **0.00**, **Integer**, **Currency** (USD), **Percent**,
+  **Date**, or **Text**.
+- **Clear formatting** removes the style from the selection.
+
+Formatting is stored on the cell record, so it survives **Save**, reload, and print.
+Copying a formatted cell within the app copies its style with the value. A formatted
+empty cell is still part of the used range for printing.
+
+### Find and replace
+
+`Ctrl+F` opens find; `Ctrl+H` opens find with the replace field focused.
+
+- Search is limited to the **active sheet** and matches the raw cell contents, so
+  formulas can be found by their formula text.
+- Matching is literal, not a regular expression. The case-insensitive toggle controls
+  case sensitivity.
+- `Enter` in the find field moves to the next match; `Shift+Enter` moves to the previous
+  match.
+- **Replace** replaces the current match and advances. **Replace all** replaces every
+  match on the sheet in one undoable action.
+- The dialog reports the match count and the address of the current match.
+
+### Sort
+
+1. Select a cell inside the table, or select the range to sort.
+2. Click **Sort A→Z** or **Sort Z→A**.
+
+The app detects the contiguous data region around the selection, keeps a detected
+header row in place, sorts the remaining rows by the column of the focused cell, and
+keeps blank cells at the bottom. Ties keep their original order. Sorting is a single
+undoable action.
+
+If you select a range explicitly, that range is sorted rather than the detected
+region. The toolbar reports the key column and range in a toast.
 
 ### Sheets
 
 - **New sheet** in the toolbar, or the `+` tab, prompts for a name.
 - Sheet names must be unique.
+- Double-click a tab, or right-click it and choose **Rename sheet**, to rename.
+- Right-click a tab for **Duplicate sheet** or **Delete sheet**. The last sheet cannot
+  be deleted.
+- Duplicating copies the cells, styles, and sheet metadata into a new sheet.
 - Switching sheets resets the selection to `A1` and leaves the tab's data intact.
 - A dot on a tab means that sheet has unsaved changes.
 - **Save** persists every sheet, not just the active one.
 - **Clear sheet** empties the active sheet after a confirmation.
+
+### Printing
+
+**Print** (or `Ctrl+P`) opens a print window containing the used range of the active
+sheet, with row numbers, column letters, and the cell formatting. Use the browser's
+print dialog to print or save as PDF. Pop-ups must be allowed for the print window to
+open.
+
+The print view has no page-setup controls yet: no margins, orientation, fit-to-width,
+page breaks, repeated headers, charts, or comments. Those are roadmap items.
 
 ### Saving
 
@@ -229,6 +347,8 @@ If the browser is closed while an AI edit is pending, the reload guard asks you 
 - **Online / Offline** reflects `navigator.onLine` and updates live.
 - **AI ready / AI off** reflects whether at least one provider key exists.
 - The status bar shows **Ready** or **Unsaved changes**, plus the selected cell address.
+- Selecting more than one cell adds count, sum, and average statistics for the numeric
+  values in the range.
 - Formula errors render as `⚠ #CYCLE`, `⚠ #DIV/0!`, and so on, with the cell styled as an error.
 
 ---
@@ -546,11 +666,15 @@ Formulas start with `=`. References are A1-style and case-insensitive.
 
 | Element | Examples | Notes |
 | --- | --- | --- |
-| Cell reference | `A1`, `B12`, `Z100` | Resolved against the active sheet |
-| Range | `A1:B10`, `B2:B9` | Rectangular; put the upper-left reference first |
+| Cell reference | `A1`, `$A$1`, `$A1`, `A$1` | `$` locks the column or row when copied or filled |
+| Sheet reference | `Sheet2!A1`, `'Data 2'!A1` | Quote sheet names that contain spaces or punctuation |
+| Range | `A1:B10`, `Sheet2!A1:B2` | Rectangular; put the upper-left reference first |
 | Number | `42`, `3.14` | Parsed as a JavaScript number |
-| String | `"Total"`, `"%"` | Double quotes; no escape sequence for a quote |
+| String | `"Total"`, `"Say ""hi"""` | Double quotes; double a quote to include it |
+| Boolean | `TRUE`, `FALSE` | Also returned by comparisons |
+| Error literal | `#N/A`, `#VALUE!` | Can be written directly into a formula |
 | Arithmetic | `+`, `-`, `*`, `/`, `^` | `^` is exponentiation |
+| Percent | `50%` | Postfix; equivalent to `/100` |
 | Comparison | `=`, `<>`, `<`, `>`, `<=`, `>=` | Return booleans |
 | Concatenation | `&` | Converts both sides to strings |
 | Grouping | `(`, `)` | Standard precedence |
@@ -559,30 +683,24 @@ Formulas start with `=`. References are A1-style and case-insensitive.
 
 ### Functions
 
-| Function | What it does | Example |
-| --- | --- | --- |
-| `SUM(...)` | Adds all numeric values; ranges are flattened; text is ignored | `=SUM(B2:B10)` |
-| `AVERAGE(...)` | Arithmetic mean of numeric values | `=AVERAGE(B2:B10)` |
-| `MIN(...)` | Smallest numeric value, or `0` when there are none | `=MIN(B2:B10)` |
-| `MAX(...)` | Largest numeric value, or `0` when there are none | `=MAX(B2:B10)` |
-| `COUNT(...)` | Counts numeric values | `=COUNT(B2:B10)` |
-| `COUNTA(...)` | Counts non-empty values | `=COUNTA(A2:A10)` |
-| `IF(condition, then, else)` | Returns one of two values | `=IF(D2>100,"Over","OK")` |
-| `AND(...)` | True when every argument is truthy | `=AND(B2>0,C2>0)` |
-| `OR(...)` | True when any argument is truthy | `=OR(B2>10,C2>10)` |
-| `NOT(value)` | Logical negation | `=NOT(B2="")` |
-| `ROUND(number, digits)` | Rounds to the given decimal places (default `0`) | `=ROUND(C2*B2,2)` |
-| `TEXT(value, format)` | `"%"` formats a fraction as a whole percent; other formats return the value as text | `=TEXT(0.256,"%")` → `26%` |
-| `TODAY()` | Current date as `YYYY-MM-DD` | `=TODAY()` |
-| `CONCATENATE(...)` | Joins arguments as text | `=CONCATENATE(A2," ",B2)` |
-| `UPPER(text)` | Uppercase | `=UPPER(A2)` |
-| `LOWER(text)` | Lowercase | `=LOWER(A2)` |
-| `LEN(text)` | Character count | `=LEN(A2)` |
-| `TRIM(text)` | Removes leading and trailing whitespace | `=TRIM(A2)` |
-| `ABS(number)` | Absolute value | `=ABS(B2-C2)` |
-| `INT(number)` | Truncates toward zero | `=INT(B2)` |
+There are **116 callable functions**: 114 in the core function table plus lazy `IF` and
+`IFERROR`. Function names are case-insensitive. Ranges are flattened for numeric
+aggregation; text and blanks are ignored where the function says so.
 
-There are exactly 20 functions. `NOW()`, `VLOOKUP()`, `SUMIF()`, `COUNTIF()`, date arithmetic, and financial functions are not implemented.
+| Category | Functions | Notes and examples |
+| --- | --- | --- |
+| Math (25) | `SUM`, `PRODUCT`, `SUMPRODUCT`, `ABS`, `ROUND`, `ROUNDUP`, `ROUNDDOWN`, `INT`, `TRUNC`, `MOD`, `POWER`, `SQRT`, `EXP`, `LN`, `LOG`, `LOG10`, `PI`, `RAND`, `RANDBETWEEN`, `SIGN`, `CEILING`, `FLOOR`, `GCD`, `LCM`, `FACT` | `=ROUND(C2*B2,2)`, `=SUMPRODUCT(B2:B5,C2:C5)` |
+| Statistics (17) | `AVERAGE`, `MIN`, `MAX`, `COUNT`, `COUNTA`, `COUNTBLANK`, `MEDIAN`, `MODE`, `STDEV`, `STDEVP`, `VAR`, `VARP`, `LARGE`, `SMALL`, `RANK`, `PERCENTILE`, `QUARTILE` | `=AVERAGE(B2:B10)`, `=LARGE(B2:B10,3)`, `=STDEV(B2:B10)` |
+| Conditional aggregation (6) | `COUNTIF`, `COUNTIFS`, `SUMIF`, `SUMIFS`, `AVERAGEIF`, `AVERAGEIFS` | Criteria support `=`, `<>`, `<`, `>`, `<=`, `>=`, `*` and `?` wildcards: `=SUMIF(A2:A10,"Widgets",B2:B10)` |
+| Text (24) | `CONCATENATE`, `CONCAT`, `TEXTJOIN`, `LEFT`, `RIGHT`, `MID`, `LEN`, `LOWER`, `UPPER`, `PROPER`, `TRIM`, `CLEAN`, `SUBSTITUTE`, `REPLACE`, `FIND`, `SEARCH`, `EXACT`, `VALUE`, `TEXT`, `CHAR`, `CODE`, `UNICHAR`, `UNICODE`, `REPT` | `=TEXTJOIN(", ",TRUE,A2:A5)`, `=LEFT(A2,3)`, `=TEXT(B2,"$#,##0.00")` |
+| Date and time (12) | `TODAY`, `NOW`, `DATE`, `YEAR`, `MONTH`, `DAY`, `WEEKDAY`, `DAYS`, `DATEDIF`, `EDATE`, `EOMONTH`, `NETWORKDAYS` | `=TODAY()`, `=EDATE(A2,3)`, `=NETWORKDAYS(A2,B2)` |
+| Lookup and reference (9) | `VLOOKUP`, `HLOOKUP`, `INDEX`, `MATCH`, `XLOOKUP`, `CHOOSE`, `ADDRESS`, `ROWS`, `COLUMNS` | `=VLOOKUP(A2,Sheet2!A1:C10,3,FALSE)`, `=INDEX(B2:B10,MATCH(A2,A2:A10,0))`, `=XLOOKUP(A2,A2:A10,B2:B10,"Not found")` |
+| Logical and information (19) | `IF`, `IFERROR`, `AND`, `OR`, `XOR`, `NOT`, `TRUE`, `FALSE`, `NA`, `ISBLANK`, `ISNUMBER`, `ISTEXT`, `ISNONTEXT`, `ISLOGICAL`, `ISERROR`, `ISERR`, `ISNA`, `TYPE`, `ERROR.TYPE` | `=IF(D2>100,"Over","OK")`, `=IFERROR(A2/B2,0)`, `=AND(B2>0,C2>0)` |
+| Financial (4) | `PMT`, `FV`, `PV`, `NPV` | `=PMT(0.05/12,60,-10000)`, `=NPV(0.1,B2:B10)` |
+
+`IF` and `IFERROR` are lazy: only the selected branch is evaluated, so
+`=IF(B2=0,0,A2/B2)` does not raise a division error. Lookup functions are
+case-insensitive for text matching and return `#N/A` when no match is found.
 
 ### Recalculation
 
@@ -590,7 +708,12 @@ There are exactly 20 functions. `NOW()`, `VLOOKUP()`, `SUMIF()`, `COUNTIF()`, da
 - A formula can reference a formula cell; evaluation resolves recursively.
 - After **any** edit, every formula on the active sheet is recomputed. Dependent totals, chains such as `E2 = E1`, and formulas elsewhere on the sheet update in the same pass.
 - On load, every sheet is recomputed from its raw cells before it is rendered.
-- `TODAY()` depends on the current date, so reopening the workbook can change its result even if the raw cell did not change.
+- Cross-sheet references resolve against the other sheet's current computed values. If a
+  formula on another sheet depends on the sheet you just edited, switch to that sheet or
+  save/reload to refresh it; a full incremental dependency graph is a roadmap item.
+- `TODAY()` and `NOW()` depend on the clock, and `RAND()`/`RANDBETWEEN()` return new
+  values on each recalculation. Reopening the workbook can change their results even if
+  the raw cell did not change.
 
 ### Errors
 
@@ -598,7 +721,12 @@ There are exactly 20 functions. `NOW()`, `VLOOKUP()`, `SUMIF()`, `COUNTIF()`, da
 | --- | --- |
 | `#CYCLE` | A circular reference was detected |
 | `#DIV/0!` | Division by zero (or a non-numeric divisor) |
-| `#NAME?` | Unknown function name |
+| `#NAME?` | Unknown function name or unparseable identifier |
+| `#VALUE!` | Wrong argument type or malformed range operation |
+| `#NUM!` | Invalid numeric operation, such as a negative square root |
+| `#N/A` | Lookup found no match, or `NA()` was called |
+| `#REF!` | Invalid cell reference |
+| `#NULL!` | Invalid range intersection |
 | `#ERROR` | Malformed formula or evaluation failure |
 
 Errors propagate through dependent formulas, and the grid marks the cell with a warning triangle. Blank cells evaluate to an empty string, which numeric functions ignore.
@@ -651,8 +779,10 @@ Anything beyond column Z is dropped, and the grid only displays rows 1–100. Fo
 
 | Feature | Offline |
 | --- | --- |
-| Grid, formulas, sheets, keyboard navigation | Yes |
-| Create and switch sheets | Yes |
+| Grid, formulas, ranges, sheets, keyboard navigation | Yes |
+| Undo/redo, clipboard, fill, formatting, find/replace, sort | Yes |
+| Create, rename, duplicate, and delete sheets | Yes |
+| Print window | Yes, through the browser's local print dialog |
 | Save to IndexedDB | Yes |
 | CSV import and export | Yes |
 | XLSX import and export | Only if SheetJS was cached on a previous online visit |
@@ -670,7 +800,7 @@ Anything beyond column Z is dropped, and the grid only displays rows 1–100. Fo
 
 ### Updating the app
 
-When you change any cached asset, bump `CACHE_NAME` in `sw.js` (currently `aispreadsheet-v29`). On the next visit the new worker installs, the old cache is deleted, and `clients.claim()` takes over. If a browser still shows an old build, do a hard reload or close all tabs for the origin and reopen.
+When you change any cached asset, bump `CACHE_NAME` in `sw.js` (currently `aispreadsheet-v30`). On the next visit the new worker installs, the old cache is deleted, and `clients.claim()` takes over. If a browser still shows an old build, do a hard reload or close all tabs for the origin and reopen.
 
 ---
 
@@ -680,18 +810,20 @@ When you change any cached asset, bump `CACHE_NAME` in `sw.js` (currently `aispr
 
 | File | Responsibility |
 | --- | --- |
-| `index.html` | App shell: header, toolbar, formula bar, sheet tabs, grid, assistant margin, review strip, settings dialog |
-| `style.css` | Design tokens, layout, grid, assistant, model picker, review strip, responsive rules |
+| `index.html` | App shell: header, toolbar, formula bar, format bar, sheet tabs, grid, status statistics, assistant margin, review strip, find dialog, sheet context menu, settings dialog |
+| `style.css` | Design tokens, layout, grid, range selection, format bar, find dialog, sheet menu, assistant, model picker, review strip, responsive rules |
 | `fonts.css`, `fonts/` | Self-hosted Libre Franklin, Source Serif 4, and Spline Sans Mono (SIL OFL) |
-| `app.js` | Main controller: initialization, toolbar, keyboard, import/export, sheet lifecycle, AI wiring, pending-edit snapshots |
-| `grid.js` | Single source of truth for `sheets`, `activeSheet`, `selectedCell`, `dirty`; rendering; recalculation |
-| `engine.js` | Tokenizer, shunting-yard parser, evaluator, 20 functions, range expansion, error and cycle handling |
+| `app.js` | Main controller: initialization, toolbar, keyboard, formatting, clipboard, find/replace, sort, print, import/export, sheet lifecycle, AI wiring, pending-edit snapshots |
+| `grid.js` | Single source of truth for `sheets`, `activeSheet`, `selection`, `dirty`, and history; rendering, recalculation, formatting, fill, clipboard, sort, sheet helpers |
+| `engine.js` | Recursive-descent formula parser and AST evaluator, 114 core functions plus lazy `IF`/`IFERROR`, cross-sheet and absolute references, formula translation, error and cycle handling |
 | `ai.js` | Provider clients, key pools, model discovery, fallback chains, prompt construction, dispatch, connection tests |
 | `research.js` | Search, reader, Wikipedia fallback, table extraction, 20-minute cache |
 | `markdown.js` | Safe Markdown rendering, pipe-table parsing, table-to-cell mapping |
-| `storage.js` | IndexedDB schema and sheet CRUD |
+| `storage.js` | IndexedDB schema, sheet CRUD with metadata, duplicate-name reconciliation |
 | `sw.js` | Service worker: precache, runtime cache, network-only hosts |
 | `manifest.json` | PWA metadata and icons |
+| `docs/FEATURE-RESEARCH.md` | Benchmark matrix, product notes, gap analysis, sources |
+| `docs/ROADMAP.md` | Phase 2–5 plan, acceptance criteria, dependencies, risks |
 | `docs/screenshots/` | Images used by this README |
 
 ### State flow
@@ -713,6 +845,8 @@ flowchart LR
 
 `grid.js` owns the workbook state. `app.js` reads and mutates it only through exported accessors. `engine.js` is pure with respect to the sheet: it receives a cell map and returns a value. `ai.js` never touches the grid directly; it returns text and proposed writes, and `app.js` turns a proposal into a permission slip.
 
+History lives beside the workbook state in `grid.js`: before a mutating action, `recordHistory(label)` captures a deep snapshot of every sheet. Undo and redo restore those snapshots, so a multi-cell paste, a sort, or a formatting change is one action. The stack is capped at 60 entries and is intentionally not persisted.
+
 ### Data model
 
 ```js
@@ -721,11 +855,21 @@ flowchart LR
     name: "Sheet1",
     cells: {
       "A1": { raw: "Item", value: "Item", error: null, header: true },
-      "B2": { raw: "1.50", value: 1.5, error: null },
+      "B2": {
+        raw: "1.50",
+        value: 1.5,
+        error: null,
+        style: { numFmt: "currency", bold: true }
+      },
       "D2": { raw: "=B2*C2", value: 15, error: null }
     },
     raw: {},
-    dirty: false
+    dirty: false,
+    meta: {
+      colWidths: {},
+      rowHeights: {},
+      freeze: { rows: 0, cols: 0 }
+    }
   }
 }
 ```
@@ -734,11 +878,38 @@ flowchart LR
 - `value` is the computed display value.
 - `error` is set for formula errors.
 - `header` marks a header cell so it keeps its styling and is excluded from numeric alignment.
-- IndexedDB stores one record per sheet in the `sheets` store and settings in the `settings` store.
+- `style` holds the per-cell formatting that survives save/reload; supported keys include
+  `bold`, `italic`, `underline`, `strike`, `align`, `color`, `fill`, `numFmt`, and
+  `currency`.
+- `meta` reserves per-sheet layout data (column widths, row heights, freeze position).
+  The Phase 1 UI does not expose width/height/freeze controls yet.
+- IndexedDB stores one record per sheet in the `sheets` store and settings in the
+  `settings` store. `saveSheet` updates the existing record for a name and the reader
+  collapses any duplicate-name rows left by older builds.
 
 ### Recalculation contract
 
-`recalculateSheet(name)` walks every cell on a sheet and resolves formulas from raw values. `recalculateAllSheets()` does the same for each sheet. `recomputeAndRender()` recomputes the active sheet and redraws the grid. This is why editing one input refreshes every dependent total, and why a reload shows the same numbers that were saved.
+`recalculateSheet(name)` walks every cell on a sheet and resolves formulas from raw
+values through the parser and AST evaluator. `recalculateAllSheets()` does the same for
+each sheet. `recomputeAndRender()` recomputes the active sheet and redraws the grid.
+`IF` and `IFERROR` are evaluated lazily, so only the selected branch runs. This is why
+editing one input refreshes every dependent total, and why a reload shows the same
+numbers that were saved.
+
+`recalculateSheet` is intentionally whole-sheet for Phase 1: it is simple to audit and
+fast enough for 2,600 cells. The roadmap replaces it with an incremental dependency
+graph when the grid grows.
+
+### History contract
+
+- Every mutating action calls `recordHistory(label)` before changing the workbook.
+- `undo()` restores the previous snapshot and pushes the current state onto the redo
+  stack; `redo()` does the reverse.
+- `captureState()` and the undo/redo functions are the only places that replace the
+  workbook wholesale.
+- AI writes use the same mechanism through a pending-edit snapshot, so **Discard** and
+  **Undo** both return to the exact pre-write state.
+- History does not survive reload, by design: it is an editing aid, not version history.
 
 ### Security boundaries
 
@@ -787,22 +958,51 @@ The design is intentionally closer to a ledger than to a generic dashboard: thin
 
 ### Hard limits
 
-- **26 columns × 100 rows** per sheet. There is no row or column insertion.
+- **26 columns × 100 rows** per sheet. There is no row/column insertion, deletion,
+  resizing, or hiding yet.
+- **60 undo snapshots**, in memory only. Reloading clears the history.
+- Clipboard exchange is **plain-text TSV**. Styles survive an internal copy/paste but
+  not a paste from another application.
+- Find/replace is limited to the **active sheet** and literal text.
+- Sort is **single-key**, over a detected contiguous region or an explicit rectangular
+  selection. Multi-key sort and filters are not implemented.
+- Formatting is a fixed subset: no borders, font family/size, wrap, or merged cells.
+  Currency is USD and date display is `YYYY-MM-DD` unless the cell value already carries
+  a date string.
+- Print uses the browser's print dialog, the used range, and the current formatting.
+  There are no margins, orientation, fit-to-width, page breaks, repeated headers, chart,
+  or comment options.
+- No charts, pivot tables, conditional formatting, data validation, freeze panes,
+  filters, comments, images, or shapes in this phase.
 - AI tables are requested at **20 data rows or fewer**, previewed at **8 rows**, and clamped to the grid on write.
 - Sheet context is capped at **50 non-empty cells**.
 - Output budget is **1,800 tokens** per message (**3,000** for Inkling because of the reasoning headroom).
 - Research briefs are capped at **15,000 characters**, five sources, and three read pages.
 - Research cache is **20 minutes**, with **12** entries per session.
 
-### Deliberate non-goals
+### Deferred to the roadmap
 
-- No cell formatting, fonts, colors, borders, or number formats beyond the `TEXT` percent helper.
-- No merged cells, charts, images, pivot tables, or conditional formatting.
-- No sorting, filtering, find-and-replace, or clipboard block operations.
-- No undo/redo stack. Use the AI review **Discard** for AI writes, or press `Escape` while editing a cell to cancel that edit.
-- No multi-user collaboration, sync, or accounts.
-- No live Excel formula export.
-- No background jobs; the app is idle when you are not using it.
+These are planned, not rejected. See [docs/ROADMAP.md](docs/ROADMAP.md) for scope,
+dependencies, and acceptance criteria.
+
+- Row/column operations, borders, fonts, wrap, merge, and freeze panes.
+- Filters, multi-key sort, conditional formatting, and data validation.
+- Comments, charts, pivot tables, named ranges, and array formulas.
+- A virtualized grid larger than 26 × 100.
+- XLSX fidelity for live formulas, styles, merges, and freeze panes.
+- Local version history and print layout controls.
+
+### Permanent non-goals
+
+- No real-time multi-user collaboration, sync, or accounts without a backend and a
+  conflict model.
+- No arbitrary macro or script execution. A sandboxed automation layer is a separate
+  security decision.
+- No pixel-perfect Excel rendering, full `.xlsx` feature preservation, or VBA
+  compatibility.
+- No live Excel formula export yet: exported formulas are text.
+- No telemetry, analytics, or background jobs; the app is idle when you are not using it.
+- No mobile-native app; the PWA is the delivery target.
 
 These are scope choices, not hidden limitations. The app is meant to be small enough to read, audit, and run offline.
 
@@ -919,7 +1119,9 @@ There is no bundler, transpiler, package install, or watch process. Edit a file 
 
 ### Code map
 
-- **Add a formula function:** add an entry to `FUNCTIONS` in `engine.js`, keep the name uppercase, and handle ranges through the existing argument flattening. Test a direct call, a range, and a dependent formula.
+- **Add a formula function:** add an entry to `FUNCTIONS` in `engine.js`, keep the name uppercase, and handle ranges through the existing argument flattening. `IF` and `IFERROR` are special-cased in the evaluator because they are lazy. Test a direct call, a range, and a dependent formula.
+- **Add a formatting control:** add the control to the format bar in `index.html`, wire it in `setupFormatBar` in `app.js`, store the property through `applyStyle` in `grid.js`, and render it in `formatCellDisplay` / `styleForCell` and the print path. Add the style key to the data-model docs.
+- **Add a grid operation:** capture history with `recordHistory(label)` before the first mutation, update the cells, call `recalculateSheet()`, `markDirty()`, and `renderGrid()` (or `recomputeAndRender(addr)` for one cell). Return a small result object if the toolbar needs to report what happened.
 - **Add an AI provider:** extend `PROVIDERS`, the storage slots, the model discovery and call functions, the dispatch order, and the provider labels in `ai.js`. Then add its model URL to `NETWORK_ONLY_HOSTS` in `sw.js`.
 - **Change the assistant's instructions:** edit `buildSystemPrompt` in `ai.js`. Keep the `WRITE:` contract and the "do not emit WRITE lines for tables" rule intact, or the permission flow will misparse replies.
 - **Change table insertion:** `tableToCells` in `markdown.js` clamps to the grid; `insertTableSmart` and `planTableWrite` in `app.js` choose the destination.
@@ -928,20 +1130,32 @@ There is no bundler, transpiler, package install, or watch process. Edit a file 
 
 ### State rules
 
-- `grid.js` is the only owner of `sheets`, `activeSheet`, `selectedCell`, and `dirty`.
-- `app.js` must use the exported accessors (`getSheets`, `setSheets`, `getCurrentSheet`, `setCellValue`, `recalculateSheet`, and so on).
+- `grid.js` is the only owner of `sheets`, `activeSheet`, `selection`, `dirty`, and the
+  undo/redo stacks.
+- `app.js` must use the exported accessors (`getSheets`, `setSheets`, `getCurrentSheet`,
+  `setCellValue`, `recalculateSheet`, and so on).
 - A formula edit must end with `recalculateSheet()` so dependents refresh. `recomputeAndRender()` does this for the active sheet.
+- Call `recordHistory(label)` before a multi-cell or structural mutation, not after it.
+  A user action should be one undo step.
+- Styles live on the cell record. Do not put them in a parallel map that IndexedDB does
+  not persist.
 - AI table inserts call `setCellValue` for each cell and one final `recalculateSheet(sheet)`.
 - Imports replace `cells`, then call `recalculateSheet(getActiveSheet())` before rendering.
+- `saveSheet(name, cells, raw, dirty, meta)` updates the existing row for that name and
+  deduplicates older duplicate-name records.
 - AI writes must be wrapped in the permission + snapshot flow; never call `setCellValue` directly from an AI response handler without `captureEditSnapshot`.
 
 ### Testing
 
-The repository does not ship a test runner. The build was validated with local Playwright scripts against headless Chrome at desktop (1440 × 900, 1280 × 900) and mobile (390 × 844) widths. They covered:
+The repository does not ship a test runner. The build was validated with local Playwright scripts against headless Chrome at desktop (1440 × 900, 1280 × 900, 1360 × 940) and mobile (390 × 844) widths. They covered:
 
 - initial render, seeded formulas, and the settings dialog;
 - formula recalculation after a dependent cell edit, including a two-cell chain and a reload;
 - CSV import, dismissal, export-layout round-trip, and offline CSV parsing;
+- Phase 1: range selection and statistics, `Shift+Arrow`, typing-to-edit, clipboard formula
+  translation, fill down, formatting, percent format, fill colour, undo/redo, sort with a
+  header and blanks last, find/replace, sheet create/rename/duplicate, cross-sheet
+  formulas, print, persistence across reload, and `Ctrl+A`;
 - key pools, key rotation, provider fallback, masked keys, removal, and connection tests;
 - free-model discovery, free-first ordering, fallback, model memory, and reasoning headroom;
 - the model picker on desktop and mobile;
@@ -949,7 +1163,9 @@ The repository does not ship a test runner. The build was validated with local P
 - reload persistence and the pending-edit guard;
 - service-worker install, shell caching, and an offline reload.
 
-If you add a test runner, keep it outside the runtime path; the app deliberately has no dependency graph to install.
+The Phase 1 suite lives outside the runtime path in the development workspace
+(`phase1-test.mjs`). If you add a test runner, keep it outside the runtime path; the app
+deliberately has no dependency graph to install.
 
 ---
 
@@ -962,9 +1178,19 @@ Use this after changing the grid, the formula engine, the AI flow, or the servic
 - [ ] A chain such as `E1 = A1`, `E2 = E1` updates when `A1` changes.
 - [ ] Reloading preserves sheet data and recomputes formulas from raw values.
 - [ ] Arrow keys, `Tab`, `Shift+Tab`, and `Enter` move the selection; `Escape` closes the assistant.
-- [ ] Double-click edits a cell; `Enter` commits; `Escape` cancels without changing the cell.
+- [ ] Drag, `Shift+Click`, and `Shift+Arrow` select a range; the status bar shows count, sum, and average.
+- [ ] Clicking a row or column header selects that row or column; `Ctrl+A` selects the sheet.
+- [ ] Double-click, `F2`, or typing on the grid starts an edit; `Enter` commits; `Escape` cancels without changing the cell.
 - [ ] The formula bar updates the selected cell live and restores the stored value on `Escape`.
-- [ ] A new sheet can be created, named, switched to, and saved.
+- [ ] Copy/paste of a formula translates relative references; fill down/right does the same.
+- [ ] Bold/italic/underline/strike, alignment, text colour, fill colour, and every number format apply to a range.
+- [ ] Formatting and the percent format survive Save and reload.
+- [ ] Undo/redo restores a paste, a fill, a formatting change, a sort, and a replace as single actions.
+- [ ] Sort keeps the detected header, puts blanks last, and leaves ties stable.
+- [ ] Find/replace reports matches, replaces one, and replaces all on the active sheet.
+- [ ] A new sheet can be created, renamed, duplicated, switched to, and deleted; the last sheet cannot be deleted.
+- [ ] A cross-sheet formula such as `='Data 2'!A1*2` evaluates correctly.
+- [ ] Print includes the used range, row/column headers, and cell formatting.
 - [ ] CSV export produces the column-map and row-number layout.
 - [ ] CSV import replaces the active sheet after confirmation and handles quoted commas.
 - [ ] XLSX export includes every sheet when SheetJS is available.

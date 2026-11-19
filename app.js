@@ -10,10 +10,17 @@ import {
   COLUMNS, ROWS,
   initGrid, getSheets, getActiveSheet, getSelectedCell,
   isDirty, setDirty, setActiveSheet, setSheets,
-  renderTabs, renderGrid, moveSelection, selectCell,
+  renderTabs, renderGrid, moveSelection, moveToEdge, selectCell,
   seedDemoData, getCellValue, ensureCell, setCellValue,
   recomputeAndRender, getCurrentSheet, setSheetDirty, colIndexToCol,
   parseAddr, colIndex, recalculateSheet, recalculateAllSheets,
+  getSelectionRect, selectRange, selectAll, beginEditSelected,
+  captureState, recordHistory, clearHistory, undo, redo,
+  canUndo, canRedo, undoLabel, redoLabel,
+  applyStyle, selectionHasStyle, toggleStyle, clearFormatting,
+  clearSelection, fillDown, fillRight, copySelection, cutSelection, pasteText,
+  sortSelection, addSheetState, renameSheetState, duplicateSheetState,
+  formatCellDisplay, markDirty,
 } from './grid.js';
 import {
   isAIEnabled, sendAIMessage, testConnection,
@@ -32,6 +39,12 @@ import {
 ======================================================================*/
 let formulaInput, cellAddressDisplay, aiInput, aiChat, aiSidebar, toastEl;
 let researchEnabled = true;
+let formulaEditSnapshot = null;
+let formulaEditTouched = false;
+let findMatches = [];
+let findMatchIndex = -1;
+let findQuery = '';
+let sheetMenuTarget = null;
 
 /*======================================================================
   Initialization
@@ -63,6 +76,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           cells: s.cells || {},
           raw: s.raw || {},
           dirty: s.dirty || false,
+          meta: s.meta || { colWidths: {}, rowHeights: {}, freeze: { rows: 0, cols: 0 } },
         };
       });
       if (!mapped[getActiveSheet()]) {
@@ -97,7 +111,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     setupFormulaBar();
     setupKeyboard();
     setupToolbar();
+    setupFormatBar();
+    setupFindReplace();
+    setupSheetMenu();
+    setupClipboard();
     setupAI();
+
+    window.addEventListener('grid-selection', (event) => {
+      updateFormatToolbar(event.detail?.cell || null);
+    });
+    window.addEventListener('grid-history', updateHistoryButtons);
+    updateFormatToolbar(getCellValue(getSelectedCell()));
+    updateHistoryButtons();
 
     // Auto-save: visibility change + beforeunload
     const autoSave = async () => {
@@ -122,6 +147,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       const name = e.detail;
       if (name) selectSheet(name);
     });
+    window.addEventListener('new-sheet', () => promptNewSheet());
   } catch (e) {
     console.error('Initialization failed:', e);
     showToast('App failed to load: ' + e.message, 'error');
@@ -138,8 +164,20 @@ async function saveAllSheets(options = {}) {
     renderEditReview();
   }
   const all = getSheets();
+
+  // Keep IndexedDB in step with the workbook: sheets that were renamed,
+  // deleted, or undone away must not survive as stale records.
+  try {
+    const stored = await getAllSheets();
+    for (const record of stored) {
+      if (!all[record.name]) await deleteSheet(record.name);
+    }
+  } catch (err) {
+    console.warn('Could not reconcile stored sheets', err);
+  }
+
   for (const [name, sheet] of Object.entries(all)) {
-    await saveSheet(name, sheet.cells, sheet.raw, sheet.dirty);
+    await saveSheet(name, sheet.cells, sheet.raw, sheet.dirty, sheet.meta);
     sheet.dirty = false;
   }
   setDirty(false);
@@ -157,28 +195,79 @@ async function selectSheet(name) {
 }
 
 async function promptNewSheet() {
-  const name = prompt('New sheet name:');
+  const name = prompt('New sheet name:', nextSheetName());
   if (!name) return;
   const clean = name.trim();
   if (!clean) return;
   if (getSheets()[clean]) { showToast('Sheet already exists', 'error'); return; }
-  getSheets()[clean] = { name: clean, cells: {}, raw: {}, dirty: false };
-  await saveSheet(clean, {}, {}, false);
+  recordHistory('New sheet');
+  addSheetState(clean);
+  await saveSheet(clean, {}, {}, true, getSheets()[clean].meta);
   renderTabs();
   selectSheet(clean);
   showToast(`Sheet "${clean}" created`, 'ok');
 }
 
-async function deleteCurrentSheet() {
-  const cur = getActiveSheet();
-  if (Object.keys(getSheets()).length <= 1) {
-    showToast('Cannot delete last sheet', 'error'); return;
+function nextSheetName() {
+  let n = Object.keys(getSheets()).length + 1;
+  while (getSheets()[`Sheet${n}`]) n++;
+  return `Sheet${n}`;
+}
+
+async function renameSheetPrompt(name = getActiveSheet()) {
+  const next = prompt('Rename sheet:', name);
+  if (!next) return;
+  const clean = next.trim();
+  if (!clean || clean === name) return;
+  if (getSheets()[clean]) { showToast('A sheet with that name already exists', 'error'); return; }
+  const sheet = getSheets()[name];
+  if (!sheet) return;
+  recordHistory('Rename sheet');
+  if (!renameSheetState(name, clean)) { showToast('Could not rename sheet', 'error'); return; }
+  try {
+    await deleteSheet(name);
+    await saveSheet(clean, sheet.cells, sheet.raw, true, sheet.meta);
+  } catch (err) {
+    showToast('Rename saved in memory; local save failed: ' + err.message, 'error');
   }
-  if (!confirm(`Delete sheet "${cur}"?`)) return;
-  await deleteSheet(cur);
-  delete getSheets()[cur];
-  const remaining = Object.keys(getSheets());
-  selectSheet(remaining[0] || 'Sheet1');
+  renderTabs();
+  selectSheet(clean);
+  showToast(`Renamed to “${clean}”`, 'ok');
+}
+
+async function duplicateSheetPrompt(name = getActiveSheet()) {
+  const suggested = `${name} copy`;
+  const next = prompt('Name for the copy:', suggested);
+  if (!next) return;
+  const clean = next.trim();
+  if (!clean) return;
+  if (getSheets()[clean]) { showToast('A sheet with that name already exists', 'error'); return; }
+  recordHistory('Duplicate sheet');
+  if (!duplicateSheetState(name, clean)) { showToast('Could not duplicate sheet', 'error'); return; }
+  await saveSheet(clean, getSheets()[clean].cells, getSheets()[clean].raw, true, getSheets()[clean].meta);
+  renderTabs();
+  selectSheet(clean);
+  showToast(`Created “${clean}”`, 'ok');
+}
+
+async function deleteCurrentSheet() {
+  await deleteSheetByName(getActiveSheet());
+}
+
+async function deleteSheetByName(name) {
+  if (Object.keys(getSheets()).length <= 1) {
+    showToast('Cannot delete the last sheet', 'error'); return;
+  }
+  if (!confirm(`Delete sheet “${name}”?`)) return;
+  recordHistory('Delete sheet');
+  await deleteSheet(name);
+  delete getSheets()[name];
+  if (getActiveSheet() === name) {
+    const remaining = Object.keys(getSheets());
+    selectSheet(remaining[0] || 'Sheet1');
+  } else {
+    renderTabs();
+  }
   setDirty(true);
   showToast('Sheet deleted', 'ok');
 }
@@ -187,7 +276,15 @@ async function deleteCurrentSheet() {
   Formula Bar
 ======================================================================*/
 function setupFormulaBar() {
+  formulaInput.addEventListener('focus', () => {
+    formulaEditSnapshot = captureState();
+    formulaEditTouched = false;
+  });
   formulaInput.addEventListener('input', () => {
+    if (!formulaEditTouched) {
+      recordHistory('Edit formula', formulaEditSnapshot || captureState());
+      formulaEditTouched = true;
+    }
     const addr = getSelectedCell();
     const cell = ensureCell(addr);
     if (cell) {
@@ -201,21 +298,41 @@ function setupFormulaBar() {
     const addr = getSelectedCell();
     const cell = getCellValue(addr);
     if (cell && cell.raw !== formulaInput.value) {
+      if (!formulaEditTouched) recordHistory('Edit formula', formulaEditSnapshot || captureState());
       cell.raw = formulaInput.value;
       recomputeAndRender(addr);
+      setDirty(true);
+      setSheetDirty(getActiveSheet(), true);
     }
+    formulaEditSnapshot = null;
+    formulaEditTouched = false;
   });
   formulaInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') { e.preventDefault(); moveSelection(1, 0); }
-    else if (e.key === 'Escape') {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      e.stopPropagation();
+      formulaInput.blur();
+      moveSelection(1, 0);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
       const cell = getCellValue(getSelectedCell());
       formulaInput.value = cell ? cell.raw : '';
+      formulaEditTouched = false;
+      formulaInput.blur();
     }
   });
 
   cellAddressDisplay.addEventListener('click', () => {
-    const addr = prompt('Go to cell (e.g. D12):', getSelectedCell());
-    if (addr && /^[A-Z]+\d+$/i.test(addr)) selectCellUI(addr.toUpperCase());
+    const addr = prompt('Go to cell or range (e.g. D12 or A1:C8):', getSelectionRect().range);
+    if (!addr) return;
+    const clean = addr.toUpperCase().replace(/\s+/g, '');
+    if (/^[A-Z]+\d+:[A-Z]+\d+$/.test(clean)) {
+      const [start, end] = clean.split(':');
+      selectRange(start, end);
+    } else if (/^[A-Z]+\d+$/.test(clean)) {
+      selectCellUI(clean);
+    }
   });
 
   document.getElementById('btn-ai-formula').onclick = async () => {
@@ -252,24 +369,491 @@ function selectCellUI(addr) {
 /*======================================================================
   Keyboard Navigation
 ======================================================================*/
+function isTypingTarget(el) {
+  return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA'
+    || el.tagName === 'SELECT' || el.isContentEditable);
+}
+
 function setupKeyboard() {
   window.addEventListener('keydown', (e) => {
     const ae = document.activeElement;
-    if (ae === formulaInput) return;
-    if (ae === aiInput) return;
-    if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.tagName === 'SELECT')) return;
+    if (isTypingTarget(ae)) return;
+    if (ae && ae.closest && ae.closest('dialog[open]')) return;
     // Leave Enter and the arrow keys to real controls (Save/Discard, the model
-    // picker, dialog buttons) so the keyboard can operate them.
-    if (ae && ae.closest && ae.closest('button, a, [role="button"], [contenteditable="true"]')) return;
+    // picker, dialog buttons) so the keyboard can operate them. Modifier
+    // shortcuts still work after a toolbar button was clicked.
+    const interactive = ae && ae.closest
+      && ae.closest('button, a, [role="button"], [contenteditable="true"]');
+    const mod = e.ctrlKey || e.metaKey;
+    const key = e.key;
+    if (!mod && interactive) return;
 
-    if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Tab','Enter'].includes(e.key)) {
+    if (mod) {
+      const lower = key.toLowerCase();
+      if (lower === 'z') {
+        e.preventDefault();
+        const label = e.shiftKey ? redo() : undo();
+        showToast(label ? `${e.shiftKey ? 'Redid' : 'Undid'} ${label}` : 'Nothing to undo', label ? 'ok' : '');
+        return;
+      }
+      if (lower === 'y') {
+        e.preventDefault();
+        const label = redo();
+        showToast(label ? `Redid ${label}` : 'Nothing to redo', label ? 'ok' : '');
+        return;
+      }
+      if (lower === 'b') { e.preventDefault(); toggleStyle('bold'); return; }
+      if (lower === 'i') { e.preventDefault(); toggleStyle('italic'); return; }
+      if (lower === 'u') { e.preventDefault(); toggleStyle('underline'); return; }
+      if (lower === 'f') { e.preventDefault(); openFindDialog(false); return; }
+      if (lower === 'h') { e.preventDefault(); openFindDialog(true); return; }
+      if (lower === 'd') { e.preventDefault(); fillDown(); return; }
+      if (lower === 'r') { e.preventDefault(); fillRight(); return; }
+      if (lower === 'a') { e.preventDefault(); selectAll(); return; }
+      if (lower === 'p') { e.preventDefault(); printSheet(); return; }
+      if (['arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(lower)) {
+        e.preventDefault();
+        const dRow = lower === 'arrowdown' ? 1 : lower === 'arrowup' ? -1 : 0;
+        const dCol = lower === 'arrowright' ? 1 : lower === 'arrowleft' ? -1 : 0;
+        moveToEdge(dRow, dCol, e.shiftKey);
+        return;
+      }
+    }
+
+    if (key === 'F2') {
       e.preventDefault();
-      const dRow = (e.key === 'ArrowDown' || e.key === 'Enter') ? 1 : 0;
-      const dCol = (e.key === 'ArrowRight' || (e.key === 'Tab' && !e.shiftKey)) ? 1 :
-                   (e.key === 'ArrowLeft' || (e.key === 'Tab' && e.shiftKey)) ? -1 : 0;
-      moveSelection(dRow, dCol);
+      beginEditSelected(null);
+      return;
+    }
+    if (key === 'Delete' || key === 'Backspace') {
+      e.preventDefault();
+      clearSelection();
+      return;
+    }
+    if (key === 'Escape') {
+      selectCell(getSelectedCell());
+      return;
+    }
+
+    if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Tab', 'Enter', 'PageUp', 'PageDown', 'Home'].includes(key)) {
+      e.preventDefault();
+      if (key === 'Home') {
+        if (mod) selectCell('A1');
+        else {
+          const [, row] = parseAddr(getSelectedCell());
+          selectCell('A' + row);
+        }
+        return;
+      }
+      const page = key === 'PageUp' ? -20 : key === 'PageDown' ? 20 : 0;
+      const dRow = (key === 'ArrowDown' || key === 'Enter' || key === 'PageDown') ? 1
+        : (key === 'ArrowUp' || key === 'PageUp') ? -1 : 0;
+      const dCol = key === 'ArrowRight' || (key === 'Tab' && !e.shiftKey) ? 1
+        : key === 'ArrowLeft' || (key === 'Tab' && e.shiftKey) ? -1 : 0;
+      const extend = e.shiftKey && key !== 'Tab' && key !== 'Enter';
+      if (page) moveSelection(page, 0, extend);
+      else moveSelection(dRow, dCol, extend);
+      return;
+    }
+
+    // Typing on the grid starts an edit exactly like a desktop spreadsheet.
+    if (key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      e.preventDefault();
+      beginEditSelected(key);
     }
   });
+}
+
+/*======================================================================
+  Format bar, clipboard, find, sheet menu, print
+======================================================================*/
+
+function updateHistoryButtons() {
+  const undoBtn = document.getElementById('btn-undo');
+  const redoBtn = document.getElementById('btn-redo');
+  if (undoBtn) {
+    undoBtn.disabled = !canUndo();
+    undoBtn.title = canUndo() ? `Undo ${undoLabel()} (Ctrl+Z)` : 'Nothing to undo';
+  }
+  if (redoBtn) {
+    redoBtn.disabled = !canRedo();
+    redoBtn.title = canRedo() ? `Redo ${redoLabel()} (Ctrl+Y)` : 'Nothing to redo';
+  }
+}
+
+function updateFormatToolbar(cell) {
+  const style = cell?.style || {};
+  const setPressed = (id, on) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.classList.toggle('active', !!on);
+    el.setAttribute('aria-pressed', String(!!on));
+  };
+  setPressed('fmt-bold', style.bold);
+  setPressed('fmt-italic', style.italic);
+  setPressed('fmt-underline', style.underline);
+  setPressed('fmt-strike', style.strike);
+  setPressed('fmt-align-left', style.align === 'left');
+  setPressed('fmt-align-center', style.align === 'center');
+  setPressed('fmt-align-right', style.align === 'right');
+
+  const number = document.getElementById('fmt-number');
+  if (number) number.value = style.numFmt || 'general';
+  const textColor = document.getElementById('fmt-text-color');
+  if (textColor) textColor.value = style.color || '#17231d';
+  const fillColor = document.getElementById('fmt-fill-color');
+  if (fillColor) fillColor.value = style.fill || '#e5efe7';
+  updateHistoryButtons();
+}
+
+function setupFormatBar() {
+  document.getElementById('btn-undo').onclick = () => {
+    const label = undo();
+    showToast(label ? `Undid ${label}` : 'Nothing to undo', label ? 'ok' : '');
+  };
+  document.getElementById('btn-redo').onclick = () => {
+    const label = redo();
+    showToast(label ? `Redid ${label}` : 'Nothing to redo', label ? 'ok' : '');
+  };
+
+  document.getElementById('fmt-bold').onclick = () => toggleStyle('bold');
+  document.getElementById('fmt-italic').onclick = () => toggleStyle('italic');
+  document.getElementById('fmt-underline').onclick = () => toggleStyle('underline');
+  document.getElementById('fmt-strike').onclick = () => toggleStyle('strike');
+
+  const align = (value) => {
+    const active = selectionHasStyle('align') && getCellValue(getSelectedCell())?.style?.align === value;
+    applyStyle({ align: active ? null : value }, 'Align');
+  };
+  document.getElementById('fmt-align-left').onclick = () => align('left');
+  document.getElementById('fmt-align-center').onclick = () => align('center');
+  document.getElementById('fmt-align-right').onclick = () => align('right');
+
+  document.getElementById('fmt-number').onchange = (event) => {
+    applyStyle({ numFmt: event.target.value === 'general' ? null : event.target.value }, 'Number format');
+  };
+  document.getElementById('fmt-text-color').onchange = (event) => {
+    applyStyle({ color: event.target.value }, 'Text colour');
+  };
+  document.getElementById('fmt-fill-color').onchange = (event) => {
+    applyStyle({ fill: event.target.value }, 'Fill colour');
+  };
+  document.getElementById('btn-clear-format').onclick = () => {
+    clearFormatting();
+    showToast('Formatting cleared', 'ok');
+  };
+
+  document.getElementById('btn-find').onclick = () => openFindDialog(false);
+  document.getElementById('btn-sort-asc').onclick = () => runSort('asc');
+  document.getElementById('btn-sort-desc').onclick = () => runSort('desc');
+  document.getElementById('btn-print').onclick = printSheet;
+}
+
+function runSort(direction) {
+  const result = sortSelection(direction);
+  if (!result) {
+    showToast('Select at least two rows to sort', 'error');
+    return;
+  }
+  showToast(`Sorted ${result.column} ${direction === 'desc' ? 'Z→A' : 'A→Z'} over ${result.range}`, 'ok');
+}
+
+function setupClipboard() {
+  const allowed = (event) => {
+    if (isTypingTarget(document.activeElement)) return false;
+    if (event.target.closest && event.target.closest('input, textarea, [contenteditable="true"]')) return false;
+    const selectedText = window.getSelection ? String(window.getSelection()) : '';
+    if (selectedText) return false;
+    return true;
+  };
+
+  document.addEventListener('copy', (event) => {
+    if (!allowed(event)) return;
+    const text = copySelection(false);
+    if (!text) return;
+    event.clipboardData.setData('text/plain', text);
+    event.preventDefault();
+    const rect = getSelectionRect();
+    showToast(`Copied ${rect.range}`, 'ok');
+  });
+
+  document.addEventListener('cut', (event) => {
+    if (!allowed(event)) return;
+    const text = cutSelection();
+    if (!text) return;
+    event.clipboardData.setData('text/plain', text);
+    event.preventDefault();
+    showToast('Cut to clipboard', 'ok');
+  });
+
+  document.addEventListener('paste', (event) => {
+    if (!allowed(event)) return;
+    const text = event.clipboardData?.getData('text/plain');
+    if (!text) return;
+    event.preventDefault();
+    const result = pasteText(text, { internal: true });
+    showToast(`Pasted ${result.rows} × ${result.cols}`, 'ok');
+  });
+}
+
+/* ---------- Find and replace ---------- */
+
+function openFindDialog(replace = false) {
+  const dialog = document.getElementById('find-dialog');
+  if (!dialog) return;
+  if (!dialog.open) dialog.show();
+  const query = document.getElementById('find-input');
+  if (!query.value) {
+    const current = getCellValue(getSelectedCell());
+    if (current?.raw && current.raw.length < 80 && !current.raw.startsWith('=')) query.value = current.raw;
+  }
+  query.focus();
+  query.select();
+  if (replace) document.getElementById('replace-input').focus();
+  refreshFindMatches();
+}
+
+function refreshFindMatches() {
+  const query = document.getElementById('find-input')?.value || '';
+  const caseSensitive = document.getElementById('find-case')?.checked;
+  if (!query) {
+    findMatches = [];
+    findMatchIndex = -1;
+    findQuery = '';
+    updateFindStatus();
+    return;
+  }
+  if (query === findQuery && findMatches.length) {
+    updateFindStatus();
+    return;
+  }
+  findQuery = query;
+  const sheet = getCurrentSheet();
+  const needle = caseSensitive ? query : query.toLowerCase();
+  findMatches = [];
+  if (sheet) {
+    Object.entries(sheet.cells).forEach(([addr, cell]) => {
+      const raw = String(cell.raw || '');
+      if (!raw) return;
+      const hay = caseSensitive ? raw : raw.toLowerCase();
+      if (hay.includes(needle)) findMatches.push(addr);
+    });
+  }
+  findMatches.sort((a, b) => {
+    const [ac, ar] = parseAddr(a);
+    const [bc, br] = parseAddr(b);
+    return ar - br || colIndex(ac) - colIndex(bc);
+  });
+  findMatchIndex = -1;
+  updateFindStatus();
+}
+
+function updateFindStatus(message = '') {
+  const status = document.getElementById('find-status');
+  if (!status) return;
+  if (message) { status.textContent = message; return; }
+  if (!document.getElementById('find-input')?.value) {
+    status.textContent = 'Type a value or formula to search.';
+    return;
+  }
+  if (!findMatches.length) {
+    status.textContent = 'No matches on this sheet.';
+    return;
+  }
+  const current = findMatchIndex >= 0 ? `${findMatchIndex + 1} of ${findMatches.length}` : `${findMatches.length} match${findMatches.length === 1 ? '' : 'es'}`;
+  status.textContent = `${current}${findMatchIndex >= 0 ? ` · ${findMatches[findMatchIndex]}` : ''}`;
+}
+
+function findNext(direction = 1) {
+  refreshFindMatches();
+  if (!findMatches.length) { updateFindStatus(); return; }
+  const selected = getSelectedCell();
+  const current = findMatches.indexOf(selected);
+  if (current >= 0) {
+    findMatchIndex = (current + direction + findMatches.length) % findMatches.length;
+  } else {
+    findMatchIndex = direction > 0 ? 0 : findMatches.length - 1;
+  }
+  selectCellUI(findMatches[findMatchIndex]);
+  updateFindStatus();
+}
+
+function replaceCurrent() {
+  findNext(1);
+  if (findMatchIndex < 0) return;
+  const addr = findMatches[findMatchIndex];
+  const cell = getCellValue(addr);
+  const query = document.getElementById('find-input')?.value || '';
+  if (!cell || !query) return;
+  const caseSensitive = document.getElementById('find-case')?.checked;
+  const flags = caseSensitive ? 'g' : 'gi';
+  const pattern = new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), flags);
+  const replacement = document.getElementById('replace-input')?.value || '';
+  const next = String(cell.raw || '').replace(pattern, replacement);
+  if (next === cell.raw) return;
+  recordHistory('Replace');
+  cell.raw = next;
+  recomputeAndRender(addr);
+  markDirty();
+  refreshFindMatches();
+  updateFindStatus(`Replaced in ${addr}.`);
+}
+
+function replaceAll() {
+  const query = document.getElementById('find-input')?.value || '';
+  if (!query) return;
+  const caseSensitive = document.getElementById('find-case')?.checked;
+  const flags = caseSensitive ? 'g' : 'gi';
+  const pattern = new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), flags);
+  const replacement = document.getElementById('replace-input')?.value || '';
+  const sheet = getCurrentSheet();
+  if (!sheet) return;
+  const targets = Object.entries(sheet.cells).filter(([, cell]) => pattern.test(String(cell.raw || '')));
+  pattern.lastIndex = 0;
+  if (!targets.length) { updateFindStatus('No matches on this sheet.'); return; }
+  recordHistory('Replace all');
+  targets.forEach(([, cell]) => {
+    cell.raw = String(cell.raw || '').replace(pattern, replacement);
+  });
+  recalculateSheet();
+  markDirty();
+  renderGrid();
+  findMatches = [];
+  findQuery = '';
+  refreshFindMatches();
+  updateFindStatus(`Replaced in ${targets.length} cell${targets.length === 1 ? '' : 's'}.`);
+}
+
+function setupFindReplace() {
+  const dialog = document.getElementById('find-dialog');
+  const input = document.getElementById('find-input');
+  const replace = document.getElementById('replace-input');
+  if (!dialog || !input) return;
+  input.addEventListener('input', () => {
+    findQuery = '';
+    findMatches = [];
+    findMatchIndex = -1;
+    refreshFindMatches();
+  });
+  input.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      findNext(event.shiftKey ? -1 : 1);
+    }
+  });
+  replace.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') { event.preventDefault(); replaceCurrent(); }
+  });
+  document.getElementById('btn-find-next').onclick = () => findNext(1);
+  document.getElementById('btn-find-prev').onclick = () => findNext(-1);
+  document.getElementById('btn-replace').onclick = replaceCurrent;
+  document.getElementById('btn-replace-all').onclick = replaceAll;
+  dialog.addEventListener('close', () => { findMatches = []; findQuery = ''; });
+}
+
+/* ---------- Sheet menu ---------- */
+
+function setupSheetMenu() {
+  const menu = document.getElementById('sheet-menu');
+  if (!menu) return;
+  window.addEventListener('sheet-context', (event) => {
+    sheetMenuTarget = event.detail.name;
+    menu.hidden = false;
+    const width = 190;
+    const height = 108;
+    menu.style.left = `${Math.min(event.detail.x, window.innerWidth - width - 8)}px`;
+    menu.style.top = `${Math.min(event.detail.y, window.innerHeight - height - 8)}px`;
+    menu.querySelector('button')?.focus();
+  });
+  window.addEventListener('rename-sheet', (event) => renameSheetPrompt(event.detail.name));
+  menu.addEventListener('click', async (event) => {
+    const action = event.target.closest('button')?.dataset.sheetAction;
+    if (!action) return;
+    const target = sheetMenuTarget;
+    menu.hidden = true;
+    if (action === 'rename') await renameSheetPrompt(target);
+    else if (action === 'duplicate') await duplicateSheetPrompt(target);
+    else if (action === 'delete') await deleteSheetByName(target);
+  });
+  document.addEventListener('click', (event) => {
+    if (!menu.hidden && !menu.contains(event.target)) menu.hidden = true;
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && !menu.hidden) { menu.hidden = true; menu.blur(); }
+  });
+}
+
+/* ---------- Print ---------- */
+
+function usedRange() {
+  const sheet = getCurrentSheet();
+  if (!sheet) return null;
+  let minR = ROWS, maxR = 0, minC = COLUMNS, maxC = 0;
+  Object.entries(sheet.cells).forEach(([addr, cell]) => {
+    if (!String(cell.raw || '').trim() && !cell.style) return;
+    const [col, row] = parseAddr(addr);
+    const c = colIndex(col);
+    minR = Math.min(minR, row); maxR = Math.max(maxR, row);
+    minC = Math.min(minC, c); maxC = Math.max(maxC, c);
+  });
+  if (maxR === 0) return null;
+  return { minR, maxR, minC, maxC };
+}
+
+function printSheet() {
+  const sheet = getCurrentSheet();
+  const range = usedRange();
+  if (!sheet || !range) { showToast('Nothing to print', 'error'); return; }
+  const win = window.open('', '_blank', 'width=1100,height=800');
+  if (!win) { showToast('Allow pop-ups to print or save as PDF', 'error'); return; }
+
+  const styleBits = (cell) => {
+    const style = cell?.style || {};
+    const parts = [];
+    if (style.bold) parts.push('font-weight:700');
+    if (style.italic) parts.push('font-style:italic');
+    if (style.underline || style.strike) parts.push(`text-decoration:${[style.underline ? 'underline' : '', style.strike ? 'line-through' : ''].filter(Boolean).join(' ')}`);
+    if (style.color) parts.push(`color:${style.color}`);
+    if (style.fill) parts.push(`background:${style.fill}`);
+    if (style.align) parts.push(`text-align:${style.align}`);
+    else if (typeof cell?.value === 'number') parts.push('text-align:right');
+    return parts.join(';');
+  };
+
+  const head = [];
+  head.push('<th class="corner"></th>');
+  for (let c = range.minC; c <= range.maxC; c++) head.push(`<th>${colIndexToCol(c)}</th>`);
+  const body = [];
+  for (let r = range.minR; r <= range.maxR; r++) {
+    const row = [`<th class="row">${r}</th>`];
+    for (let c = range.minC; c <= range.maxC; c++) {
+      const addr = colIndexToCol(c) + r;
+      const cell = sheet.cells[addr];
+      const text = cell ? formatCellDisplay(cell.value ?? cell.raw ?? '', cell.style || {}, cell) : '';
+      row.push(`<td style="${styleBits(cell)}">${escapeHtml(text)}</td>`);
+    }
+    body.push(`<tr>${row.join('')}</tr>`);
+  }
+
+  win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${escapeHtml(getActiveSheet())}</title>
+    <style>
+      @page { size: A4 landscape; margin: 12mm; }
+      body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color:#17231d; }
+      h1 { font-size: 16px; margin: 0 0 2px; }
+      p { color:#5c6960; font-size: 11px; margin: 0 0 12px; }
+      table { border-collapse: collapse; font-size: 10px; }
+      th, td { border: 1px solid #c8d2c8; padding: 4px 6px; white-space: nowrap; }
+      th { background: #e5efe7; color:#0c3b2b; font-weight: 600; }
+      th.row, th.corner { background:#edf1e9; color:#5c6960; font-weight: 500; }
+      tr { break-inside: avoid; }
+    </style></head><body>
+    <h1>${escapeHtml(getActiveSheet())}</h1>
+    <p>Printed ${new Date().toLocaleString()} · ${range.minR}–${range.maxR} rows</p>
+    <table><thead><tr>${head.join('')}</tr></thead><tbody>${body.join('')}</tbody></table>
+    </body></html>`);
+  win.document.close();
+  win.focus();
+  setTimeout(() => win.print(), 300);
 }
 
 /*======================================================================
@@ -285,7 +869,8 @@ function setupToolbar() {
   document.getElementById('btn-import').onclick = () => document.getElementById('file-input').click();
   document.getElementById('file-input').onchange = handleImport;
   document.getElementById('btn-clear').onclick = () => {
-    if (confirm('Clear entire sheet?')) {
+    if (confirm('Clear entire sheet? Formatting goes too.')) {
+      recordHistory('Clear sheet');
       getCurrentSheet().cells = {};
       setSheetDirty(getActiveSheet(), true);
       setDirty(true);
