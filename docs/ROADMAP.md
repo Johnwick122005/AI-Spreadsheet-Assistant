@@ -69,7 +69,8 @@ long review cycles and unexpected browser bugs. Calendar time is typically longe
   and a case-sensitive toggle.
 - Single-key sort over a detected region, with header detection, blanks last, and
   stable ties.
-- Sheet create, rename, duplicate, delete, and a tab context menu.
+- Sheet create, rename, duplicate, close, and a tab context menu with per-tab close
+  controls.
 - Print window with the used range, formatting, and row/column headers.
 - 116 callable functions (114 core plus lazy `IF` and `IFERROR`), cross-sheet
   references, absolute references, and formula translation.
@@ -85,7 +86,8 @@ long review cycles and unexpected browser bugs. Calendar time is typically longe
 - [x] Formatting applies to a range, persists across reload, and undoes as one action.
 - [x] Sort keeps the header row, sends blanks last, and is stable.
 - [x] Find/replace operates on the active sheet and reports the match count.
-- [x] A sheet can be created, renamed, duplicated, switched, and deleted.
+- [x] A sheet can be created, renamed, duplicated, closed, switched to, and reopened via
+      undo.
 - [x] A cross-sheet formula evaluates correctly.
 - [x] Print opens a formatted window with the used range.
 - [x] All Phase 1 Playwright flows and the existing AI/offline suites pass.

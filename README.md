@@ -114,7 +114,7 @@ Keys are masked after they are added. Each provider keeps an ordered pool, and *
 - Formatting for a cell or range: bold, italic, underline, strikethrough, alignment, text colour, fill colour, and seven number formats.
 - Find and replace on the active sheet, with previous/next, replace one, replace all, and a case-sensitive toggle.
 - Sort a detected table by its current column, with header detection, blanks last, stable ties, and undo.
-- Sheet create, rename, duplicate, delete, and a tab context menu, with dirty markers for unsaved changes.
+- Sheet create, rename, duplicate, close, and a tab context menu, with dirty markers for unsaved changes.
 - Print the used range, including formatting and row/column headers, through the browser's print dialog or save-as-PDF flow.
 - Automatic recalculation of every formula on a sheet after any edit, so dependent totals never go stale.
 - All sheets recalculated on load, so persisted formulas reflect the saved raw values.
@@ -314,8 +314,12 @@ region. The toolbar reports the key column and range in a toast.
 - **New sheet** in the toolbar, or the `+` tab, prompts for a name.
 - Sheet names must be unique.
 - Double-click a tab, or right-click it and choose **Rename sheet**, to rename.
-- Right-click a tab for **Duplicate sheet** or **Delete sheet**. The last sheet cannot
-  be deleted.
+- Right-click a tab for **Duplicate sheet** or **Close sheet**. The last sheet cannot be closed.
+- Every tab except the last sheet shows a close control (`×`) on the right edge. Middle-click
+  a tab to close it.
+- Closing a sheet deletes that worksheet after confirmation; if the sheet has unsaved changes,
+  the confirmation warns about them. Closing is one undoable action, and **Undo** restores the
+  closed sheet.
 - Duplicating copies the cells, styles, and sheet metadata into a new sheet.
 - Switching sheets resets the selection to `A1` and leaves the tab's data intact.
 - A dot on a tab means that sheet has unsaved changes.
@@ -781,7 +785,7 @@ Anything beyond column Z is dropped, and the grid only displays rows 1–100. Fo
 | --- | --- |
 | Grid, formulas, ranges, sheets, keyboard navigation | Yes |
 | Undo/redo, clipboard, fill, formatting, find/replace, sort | Yes |
-| Create, rename, duplicate, and delete sheets | Yes |
+| Create, rename, duplicate, and close sheets | Yes |
 | Print window | Yes, through the browser's local print dialog |
 | Save to IndexedDB | Yes |
 | CSV import and export | Yes |
@@ -800,7 +804,7 @@ Anything beyond column Z is dropped, and the grid only displays rows 1–100. Fo
 
 ### Updating the app
 
-When you change any cached asset, bump `CACHE_NAME` in `sw.js` (currently `aispreadsheet-v30`). On the next visit the new worker installs, the old cache is deleted, and `clients.claim()` takes over. If a browser still shows an old build, do a hard reload or close all tabs for the origin and reopen.
+When you change any cached asset, bump `CACHE_NAME` in `sw.js` (currently `aispreadsheet-v31`). On the next visit the new worker installs, the old cache is deleted, and `clients.claim()` takes over. If a browser still shows an old build, do a hard reload or close all tabs for the origin and reopen.
 
 ---
 
@@ -1154,8 +1158,10 @@ The repository does not ship a test runner. The build was validated with local P
 - CSV import, dismissal, export-layout round-trip, and offline CSV parsing;
 - Phase 1: range selection and statistics, `Shift+Arrow`, typing-to-edit, clipboard formula
   translation, fill down, formatting, percent format, fill colour, undo/redo, sort with a
-  header and blanks last, find/replace, sheet create/rename/duplicate, cross-sheet
+  header and blanks last, find/replace, sheet create/rename/duplicate/close, cross-sheet
   formulas, print, persistence across reload, and `Ctrl+A`;
+- sheet close tabs via per-tab close control, context menu, or middle-click, plus undo after a
+  close;
 - key pools, key rotation, provider fallback, masked keys, removal, and connection tests;
 - free-model discovery, free-first ordering, fallback, model memory, and reasoning headroom;
 - the model picker on desktop and mobile;
@@ -1164,8 +1170,9 @@ The repository does not ship a test runner. The build was validated with local P
 - service-worker install, shell caching, and an offline reload.
 
 The Phase 1 suite lives outside the runtime path in the development workspace
-(`phase1-test.mjs`). If you add a test runner, keep it outside the runtime path; the app
-deliberately has no dependency graph to install.
+(`phase1-test.mjs`), with the sheet-close flows in `close-tab-test.mjs`. If you add a test
+runner, keep it outside the runtime path; the app deliberately has no dependency graph to
+install.
 
 ---
 
@@ -1188,7 +1195,7 @@ Use this after changing the grid, the formula engine, the AI flow, or the servic
 - [ ] Undo/redo restores a paste, a fill, a formatting change, a sort, and a replace as single actions.
 - [ ] Sort keeps the detected header, puts blanks last, and leaves ties stable.
 - [ ] Find/replace reports matches, replaces one, and replaces all on the active sheet.
-- [ ] A new sheet can be created, renamed, duplicated, switched to, and deleted; the last sheet cannot be deleted.
+- [ ] A new sheet can be created, renamed, duplicated, closed, switched to, and saved; the last sheet cannot be closed.
 - [ ] A cross-sheet formula such as `='Data 2'!A1*2` evaluates correctly.
 - [ ] Print includes the used range, row/column headers, and cell formatting.
 - [ ] CSV export produces the column-map and row-number layout.

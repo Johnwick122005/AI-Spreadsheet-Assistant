@@ -302,13 +302,31 @@ export function renderTabs() {
   const container = document.getElementById('sheet-tabs');
   if (!container) return;
   container.innerHTML = '';
-  Object.keys(sheets).forEach((name) => {
+  const names = Object.keys(sheets);
+  const closable = names.length > 1;
+
+  names.forEach((name) => {
+    const isActive = name === activeSheet;
+    const isDirty = !!sheets[name].dirty;
+
+    // The close control is a sibling, not a child, of the sheet button: nesting
+    // buttons is invalid HTML and would confuse tab textContent and screen readers.
+    const wrap = document.createElement('div');
+    wrap.className = [
+      'sheet-tab-wrap',
+      isActive ? 'active' : '',
+      isDirty ? 'dirty' : '',
+      closable ? 'has-close' : '',
+    ].filter(Boolean).join(' ');
+    wrap.dataset.sheet = name;
+
     const btn = document.createElement('button');
-    btn.className = `sheet-tab ${name === activeSheet ? 'active' : ''} ${sheets[name].dirty ? 'dirty' : ''}`;
+    btn.type = 'button';
+    btn.className = `sheet-tab ${isActive ? 'active' : ''} ${isDirty ? 'dirty' : ''}`;
     btn.dataset.sheet = name;
     btn.textContent = name;
     btn.title = `${name} — double-click to rename, right-click for more`;
-    btn.setAttribute('aria-pressed', String(name === activeSheet));
+    btn.setAttribute('aria-pressed', String(isActive));
     btn.addEventListener('click', () => {
       window.dispatchEvent(new CustomEvent('switch-sheet', { detail: name }));
     });
@@ -322,7 +340,33 @@ export function renderTabs() {
         detail: { name, x: event.clientX, y: event.clientY },
       }));
     });
-    container.appendChild(btn);
+    btn.addEventListener('mousedown', (event) => {
+      // Suppress Chrome's middle-click autoscroll before it starts.
+      if (event.button === 1) event.preventDefault();
+    });
+    btn.addEventListener('auxclick', (event) => {
+      if (event.button !== 1) return;
+      event.preventDefault();
+      window.dispatchEvent(new CustomEvent('close-sheet', { detail: { name } }));
+    });
+    wrap.appendChild(btn);
+
+    if (closable) {
+      const close = document.createElement('button');
+      close.type = 'button';
+      close.className = 'sheet-tab-close';
+      close.dataset.sheetClose = name;
+      close.setAttribute('aria-label', `Close sheet ${name}`);
+      close.title = `Close sheet "${name}"`;
+      close.textContent = '×';
+      close.addEventListener('click', (event) => {
+        event.stopPropagation();
+        window.dispatchEvent(new CustomEvent('close-sheet', { detail: { name } }));
+      });
+      wrap.appendChild(close);
+    }
+
+    container.appendChild(wrap);
   });
 
   const add = document.createElement('button');

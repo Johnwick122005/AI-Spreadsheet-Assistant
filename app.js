@@ -148,6 +148,10 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (name) selectSheet(name);
     });
     window.addEventListener('new-sheet', () => promptNewSheet());
+    window.addEventListener('close-sheet', (e) => {
+      const name = e.detail?.name;
+      if (name) closeSheetByName(name);
+    });
   } catch (e) {
     console.error('Initialization failed:', e);
     showToast('App failed to load: ' + e.message, 'error');
@@ -251,25 +255,38 @@ async function duplicateSheetPrompt(name = getActiveSheet()) {
 }
 
 async function deleteCurrentSheet() {
-  await deleteSheetByName(getActiveSheet());
+  await closeSheetByName(getActiveSheet());
 }
 
-async function deleteSheetByName(name) {
+async function closeSheetByName(name) {
   if (Object.keys(getSheets()).length <= 1) {
-    showToast('Cannot delete the last sheet', 'error'); return;
+    showToast('Cannot close the last sheet', 'error'); return false;
   }
-  if (!confirm(`Delete sheet “${name}”?`)) return;
-  recordHistory('Delete sheet');
-  await deleteSheet(name);
+  const names = Object.keys(getSheets());
+  const sheet = getSheets()[name];
+  if (!sheet) return false;
+  const question = sheet.dirty
+    ? `Close sheet "${name}"? It has unsaved changes.`
+    : `Close sheet "${name}"?`;
+  if (!confirm(question)) return false;
+  recordHistory('Close sheet');
+  try {
+    await deleteSheet(name);
+  } catch (err) {
+    showToast('Close saved in memory; local save failed: ' + err.message, 'error');
+  }
   delete getSheets()[name];
   if (getActiveSheet() === name) {
-    const remaining = Object.keys(getSheets());
-    selectSheet(remaining[0] || 'Sheet1');
+    const remaining = names.filter((n) => n !== name);
+    const index = Math.max(0, names.indexOf(name));
+    const next = remaining[Math.min(index, remaining.length - 1)] || remaining[0];
+    selectSheet(next);
   } else {
     renderTabs();
   }
   setDirty(true);
-  showToast('Sheet deleted', 'ok');
+  showToast(`Closed "${name}"`, 'ok');
+  return true;
 }
 
 /*======================================================================
@@ -773,7 +790,7 @@ function setupSheetMenu() {
     menu.hidden = true;
     if (action === 'rename') await renameSheetPrompt(target);
     else if (action === 'duplicate') await duplicateSheetPrompt(target);
-    else if (action === 'delete') await deleteSheetByName(target);
+    else if (action === 'close') await closeSheetByName(target);
   });
   document.addEventListener('click', (event) => {
     if (!menu.hidden && !menu.contains(event.target)) menu.hidden = true;

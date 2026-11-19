@@ -268,27 +268,39 @@ body {
 }
 .sheet-tabs::-webkit-scrollbar { display: none; }
 
-.sheet-tab {
+.sheet-tab-wrap {
   position: relative;
   flex: 0 0 auto;
-  max-width: 220px;
+  display: flex;
+  align-items: stretch;
+  border-top: 2px solid transparent;
+  border-right: 1px solid var(--rule);
+  transition: background-color 0.12s ease;
+}
+.sheet-tab-wrap:hover { background: var(--paper-deep); }
+.sheet-tab-wrap.active {
+  background: var(--surface);
+  border-top-color: var(--ledger);
+}
+
+.sheet-tab {
+  position: relative;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 200px;
   padding: 0 16px;
   overflow: hidden;
   text-overflow: ellipsis;
   border: 0;
-  border-top: 2px solid transparent;
-  border-right: 1px solid var(--rule);
   background: transparent;
   color: var(--muted);
   font: 500 12px/1 var(--font-ui);
   white-space: nowrap;
   cursor: pointer;
-  transition: background-color 0.12s ease, color 0.12s ease;
+  transition: color 0.12s ease;
 }
-.sheet-tab:hover { background: var(--paper-deep); color: var(--ink); }
+.sheet-tab:hover { color: var(--ink); }
 .sheet-tab.active {
-  background: var(--surface);
-  border-top-color: var(--ledger);
   color: var(--ink);
   font-weight: 600;
 }
@@ -300,6 +312,34 @@ body {
   width: 5px; height: 5px;
   border-radius: 50%;
   background: var(--ochre);
+}
+.sheet-tab-wrap.has-close .sheet-tab { padding-right: 7px; }
+.sheet-tab-wrap.has-close .sheet-tab.dirty { padding-right: 16px; }
+.sheet-tab-wrap.has-close .sheet-tab.dirty::before { right: 4px; }
+
+.sheet-tab-close {
+  flex: 0 0 20px;
+  width: 20px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--muted);
+  font: 400 15px/1 var(--font-ui);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s ease, color 0.12s ease, background-color 0.12s ease;
+}
+.sheet-tab-wrap:hover .sheet-tab-close,
+.sheet-tab-wrap.active .sheet-tab-close,
+.sheet-tab-close:focus-visible { opacity: 1; }
+.sheet-tab-close:hover {
+  background: var(--red-soft);
+  color: var(--red-ink);
+}
+@media (hover: none) {
+  .sheet-tab-close { opacity: 1; }
 }
 .sheet-tab-add {
   flex: 0 0 34px;

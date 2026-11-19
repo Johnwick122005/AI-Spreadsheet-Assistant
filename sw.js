@@ -2,7 +2,7 @@
   Service Worker — Offline Caching
 ======================================================================*/
 
-const CACHE_NAME = 'aispreadsheet-v30';
+const CACHE_NAME = 'aispreadsheet-v31';
 const PRECACHE_TIMEOUT = 8000;
 const ASSETS = [
   './',
